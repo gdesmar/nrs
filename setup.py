@@ -16,12 +16,10 @@ setup(name='nrs',
       author='isra17',
       author_email='isra017@gmail.com',
       url='https://github.com/isra17/nrs',
-      packages=['nrs','nrs.ext', 'nrs.ext.bzlib', 'nrs.ida', \
-                'nrs.strings'],
+      packages=['nrs', 'nrs.ext', 'nrs.ext.bzlib', 'nrs.ida', 'nrs.nsi', 'nrs.strings'],
 
       install_requires=['future'],
       setup_requires=['pytest-runner'],
       tests_require=['pytest'],
       ext_modules=[bzlib]
     )
-
