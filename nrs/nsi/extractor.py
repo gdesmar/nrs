@@ -1,9 +1,14 @@
 import struct
 import sys
 
-from . import csidl
 from nrs import fileform
+from nrs.nsi import WM_MSG, csidl
 from nrs.nsisfile import NSIS
+
+WM_MSGs = {}
+for (k, v) in WM_MSG.__dict__.items():
+    if k.startswith("WM_"):
+        WM_MSGs[v] = k
 
 DEBUG = False
 
@@ -328,10 +333,10 @@ class Extractor:
                     ns = string_block[i + i_offset]
 
                     if string_block[i + i_offset] == NS_SHELL_CODE:
-                        ##               if isVerNS3:
-                        ##                   nsCur = DECODE_SHORT(fo2, 'NS_SHELL_CODE' )
-                        ##                   nsAll = nsCur
-                        ##               else:
+                        #               if isVerNS3:
+                        #                   nsCur = DECODE_SHORT(fo2, 'NS_SHELL_CODE' )
+                        #                   nsAll = nsCur
+                        #               else:
 
                         nsCur = struct.unpack("<B", string_block[i + i_offset + 1].to_bytes(1, "big"))[0]
                         nsAll = struct.unpack("<B", string_block[i + i_offset + 2].to_bytes(1, "big"))[0]
@@ -382,7 +387,7 @@ class Extractor:
                             strData += retval
                         else:
                             raise Exception("NSIS_SETUP.get_NSIS_string: How do we get in here? Anything to do?")
-                            fo2.seek(-2, os.SEEK_CUR)
+                            # fo2.seek(-2, os.SEEK_CUR)
                             # strData += chr(A) + chr(B)
                         # stop
 
@@ -423,7 +428,7 @@ class Extractor:
                 raise (ValueError)
 
     def add_string(self, data, Prefix="", Postfix=""):
-        return self.quoteStringIfNeeded(Prefix + self.get_NSIS_string(data) + Postfix)
+        return self.quoteStringIfNeeded(f"{Prefix}{self.get_NSIS_string(data)}{Postfix}")
 
     def quoteStringIfNeeded(self, data):
         hasSpace = " " in data
@@ -497,7 +502,9 @@ class Extractor:
             return EnumList[index]
         except IndexError:
             # TODO: Add that as a DecompComment?
-            # print(f"NSIS_SETUP.getnumtokens: Select EnumMember '{index}' fail - plz do it manually from this list: {Enum}")
+            # print(
+            #   f"NSIS_SETUP.getnumtokens: Select EnumMember '{index}' fail - plz do it manually from this list: {Enum}"
+            # )
             return PreFix_NotFound + "%i" % index
 
     def F(self, data):
@@ -694,9 +701,9 @@ class Extractor:
             SF_BOLD = 8
             SF_RO = 0x10
             SF_EXPAND = 0x20
-            SF_PSELECTED = 0x40
-            SF_TOGGLED = 0x80
-            SF_NAMECHG = 0x100
+            SF_PSELECTED = 0x40  # noqa: F841
+            SF_TOGGLED = 0x80  # noqa: F841
+            SF_NAMECHG = 0x100  # noqa: F841
 
             name = self.S(section.name_ptr, "!" if section.flags & SF_BOLD else "")
 
@@ -806,7 +813,10 @@ class Extractor:
                     else:
                         Decomp = "StrCpy %s %s %s %s" % (self.V(parm0), self.Sq(parm1), self.S(parm2), self.S(parm3))
                         if self.V(parm0) == "$PLUGINSDIR":
-                            DecompComment += '<-that\'ll give a compile error! Anyway delete whole function and replace calls with a simple "InitPluginsDir" '
+                            DecompComment += (
+                                "<-that'll give a compile error! Anyway delete whole function and replace"
+                                ' calls with a simple "InitPluginsDir" '
+                            )
                     break
                 if case(e.EW_READREGSTR):
                     if parm4 == 0:
@@ -1132,7 +1142,11 @@ class Extractor:
                         "/RESIZETOFIT" if parm2 else "",
                         self.get_NSIS_string(parm0),
                     )
-                    DecompComment = 'you may need to "AddBrandingImage left 100" or sth at the beginning - exact data for the is in .rsrc\DLG_105:1033[SS_BITMAP]; brandingCtl.sHeight = wh brandingCtl.sX = padding; (left|right|top|bottom)'
+                    DecompComment = (
+                        'you may need to "AddBrandingImage left 100" or sth at the beginning - exact data for the is '
+                        "in .rsrc\\DLG_105:1033[SS_BITMAP]; brandingCtl.sHeight = wh brandingCtl.sX = padding; (left|"
+                        "right|top|bottom)"
+                    )
                     break
                 if case(e.EW_GETFUNCTIONADDR):
                     Decomp = "GetFunctionAddress %s %s" % (self.V(parm0), self.F(parm1))
@@ -1240,14 +1254,6 @@ class Extractor:
                     )
                     break
                 if case(e.EW_SENDMESSAGE):
-                    # TODO: Pack WM_MSGs inside some init
-                    WM_MSGs = {}
-                    import win32con
-
-                    for (k, v) in win32con.__dict__.items():
-                        if k.startswith("WM_"):
-                            WM_MSGs[v] = k
-
                     HWND = self.S(parm1)
                     msg = self.S(parm2)
                     msgAsText = WM_MSGs.get(eval(msg))
@@ -1303,7 +1309,10 @@ class Extractor:
                     )
 
                     if MB_Text == "Error! Can't initialize plug-ins directory. Please try again later.":
-                        DecompComment += 'Name of this function is "Initialize_____Plugins" - Plz delete it and replace all Calls (+SetDetailsPrint lastused) with "InitPluginsDir"'
+                        DecompComment += (
+                            'Name of this function is "Initialize_____Plugins" - Plz delete it and '
+                            'replace all Calls (+SetDetailsPrint lastused) with "InitPluginsDir"'
+                        )
 
                     # uninstall_mode?
                     #   Initialize_____Plugins
@@ -1343,9 +1352,15 @@ class Extractor:
                         # nlf == 0
                         Decomp = "CallInstDLL  %s %s %s" % (dllfile, NOUNLOAD, function_name)
 
-                    DecompComment = "maybe that from TOK__PLUGINCOMMAND sequence: EW_REGISTERDLL <- EW_PUSHPOP <- EW_UPDATETEXT <- EW_EXTRACTFILE <-EW_CALL"
+                    DecompComment = (
+                        "maybe that from TOK__PLUGINCOMMAND sequence: EW_REGISTERDLL <- EW_PUSHPOP <- "
+                        "EW_UPDATETEXT <- EW_EXTRACTFILE <-EW_CALL"
+                    )
                     DecompComment += (
-                        '# or sth like >InstallOptions::initDialog "$INI"< CallInstDLL InstallOptions.dll  Push $INI SetDetailsPrint lastused File Call $PLUGINSDIR'
+                        (
+                            '# or sth like >InstallOptions::initDialog "$INI"< CallInstDLL InstallOptions.dll'
+                            "  Push $INI SetDetailsPrint lastused File Call $PLUGINSDIR"
+                        )
                         if parm4
                         else ""
                     )
@@ -1360,10 +1375,10 @@ class Extractor:
                     break
                 if case(e.EW_COPYFILES):
                     FOF_SILENT = 4
-                    FOF_NOCONFIRMATION = 0x10
+                    FOF_NOCONFIRMATION = 0x10  # noqa: F841
                     FOF_FILESONLY = 0x80
-                    FOF_SIMPLEPROGRESS = 0x100
-                    FOF_NOCONFIRMMKDIR = 0x200
+                    FOF_SIMPLEPROGRESS = 0x100  # noqa: F841
+                    FOF_NOCONFIRMMKDIR = 0x200  # noqa: F841
 
                     flags = ""
                     # parm4 = int( S(parm4) )
@@ -1393,7 +1408,6 @@ class Extractor:
                         FILE_ATTRIBUTE_READONLY: "READONLY",
                         FILE_ATTRIBUTE_SYSTEM: "SYSTEM",
                         FILE_ATTRIBUTE_TEMPORARY: "TEMPORARY",
-                        FILE_ATTRIBUTE_NORMAL: "0",
                     }
                     RawAttributes = parm1
                     StrAttributes = BitOptions(RawAttributes, FILE_ATTRIBUTES, "|")
@@ -1435,7 +1449,10 @@ class Extractor:
                         self.S(parm2),
                         self.E(
                             parm3,
-                            "SW_SHOWDEFAULT  SW_SHOWMAXIMIZED SW_SHOWMINIMIZED SW_HIDE SW_SHOW SW_SHOWNA SW_SHOWMINNOACTIVE",
+                            (
+                                "SW_SHOWDEFAULT  SW_SHOWMAXIMIZED SW_SHOWMINIMIZED SW_HIDE SW_SHOW "
+                                "SW_SHOWNA SW_SHOWMINNOACTIVE"
+                            ),
                         ),
                     )  # no SW_SHOWNORMAL
                     DecompComment = self.S(parm5)
@@ -1473,27 +1490,6 @@ class Extractor:
                     except Exception:
                         pass
 
-                    ##ifdef _WIN32
-                    # FILETIME ft;
-                    # if (GetFileTime(hFile,NULL,NULL,&ft))
-                    # {
-                    # PULONGLONG fti = (PULONGLONG) &ft;
-                    # *fti -= *fti % 20000000; // FAT write time has a resolution of 2 seconds
-                    # ent.offsets[3]=ft.dwLowDateTime, ent.offsets[4]=ft.dwHighDateTime;
-                    # }
-                    ##else
-
-                    # ll = Int32x32To64(t, 10000000) + 116444736000000000;
-                    #
-                    # struct stat st;
-                    # if (!fstat(fd, &st))
-                    # {
-                    # unsigned long long ll = (st.st_mtime * 10000000LL) + 116444736000000000LL;
-                    # ll -= ll % 20000000; // FAT write time has a resolution of 2 seconds
-                    # ent.offsets[3] = (int) ll, ent.offsets[4] = (int) (ll >> 32);
-                    # }
-                    ##endif
-
                     FileName = self.Sq(parm1)
                     FileOffset = parm2
 
@@ -1518,8 +1514,8 @@ class Extractor:
                     self.FileExtract.Files.append((FileName, self.FileExtract.CurDir, FileOffset, ft_dec))
 
                     DecompComment = (
-                        "Optimisation hint: >> File FOO.DIR\\%s<<  => IF prev cmd is 'SetOutPath' followed by a single(!) 'File' command(...followed by SetOutPath somewhere later)"
-                        % FileName
+                        f"Optimisation hint: >> File FOO.DIR\\{FileName}<<  => IF prev cmd is 'SetOutPath' "
+                        "followed by a single(!) 'File' command(...followed by SetOutPath somewhere later)"
                     )
 
                     break
@@ -1540,14 +1536,14 @@ class Extractor:
 
                             # skip next
                             # i+=1
-                            n_which = fo.uInt32()
+                            # n_which = fo.uInt32()
                             # n_parm0 = fo.Int32()
                             # n_parm1 = fo.Int32()
                             # n_parm2 = fo.Int32()
                             # n_parm3 = fo.Int32()
                             # n_parm4 = fo.Int32()
                             # n_parm5 = fo.Int32()
-
+                            """
                             fo.seek(-4, os.SEEK_CUR)
                             if e.EW_BRINGTOFRONT != n_which:
                                 print("ERROR !!! Expected next command to be EW_BRINGTOFRONT")
@@ -1555,6 +1551,7 @@ class Extractor:
                                 # fo.seek (-4*7,os.SEEK_CUR)
                             else:
                                 skipCommand = True
+                            """
 
                             # Decomp = "BringToFront"
 
@@ -1580,10 +1577,11 @@ class Extractor:
                         what = "Size"
                         Arg2 = self.Sq(parm1)
 
+                    # Those two self.S(parm0) were originally self.SECTION_FIELD(parm0), but to mimic 7z, this is better
                     if parm2 >= 0:
-                        Decomp = "SectionGet%s %s %s" % (what, self.SECTION_FIELD(parm0), self.V(parm1))
+                        Decomp = "SectionGet%s %s %s" % (what, self.S(parm0), self.V(parm1))
                     else:
-                        Decomp = "SectionSet%s %s %s" % (what, self.SECTION_FIELD(parm0), Arg2)
+                        Decomp = "SectionSet%s %s %s" % (what, self.S(parm0), Arg2)
 
                     break
                 if case(e.EW_INSTTYPESET):
@@ -1639,7 +1637,7 @@ class Extractor:
             if DEBUG:
                 # print(SectionTxt)
                 print(lineDecomp)
-            # print(lineDecompcmt)
+                print(lineDecompcmt)
 
             #        if SectionTxt:
             #            cls_Decomp.SectionTxt[i] = SectionTxt
@@ -1795,17 +1793,16 @@ class Extractor:
         self.decompFile.append("; VARIABLES\n")
 
         self.ProcessEntries()
-        
+
     def save_setup_file(self, path="output"):
         with open(path, "w") as f:
             for line in self.decompFile:
                 f.write(f"{line}\n")
-                
+
     @staticmethod
     def from_path(path):
         return Extractor(NSIS.from_path(path))
-        
-        
+
 
 # Possible tests:
 # c2a13d7d4d2ca6bef8ebdb914943563a1b583d03cf093f03fc3ac5e9cb9e5485
@@ -1816,7 +1813,7 @@ class Extractor:
 #   -> c544b90fd61190994d7ced343c05cd755a96653648daed03d541bf0a815f08d5
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     nsis_target = sys.argv[1]
     extractor = Extractor.from_path(nsis_target)
     extractor.generate_setup_file()
