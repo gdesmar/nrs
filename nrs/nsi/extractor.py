@@ -1,3 +1,4 @@
+#!/bin/env python
 import struct
 import sys
 
@@ -269,13 +270,15 @@ class Extractor:
         self.NB_STRINGS_Max = (
             nsis.header.blocks[fileform.NB_LANGTABLES].offset - nsis.header.blocks[fileform.NB_STRINGS].offset
         )
+        self.header = []
         self.UserVarNames = {}
+        self.pages = []
+        self.entries = []
         self.cls_Decomp = cls_Decomp()
         self.isVerNS3 = False
         self.isVerNS3 = bool(self.S(0x0011) == "CommonFilesDir")
         self.Tokenindex = 1
         self.FileExtract = FileExtract()
-        self.decompFile = []
 
         # Config ?
         self.supressCodeOutsideSections = 0
@@ -321,6 +324,8 @@ class Extractor:
             strData = ""
             i_offset = 0
             for i in range(strOffset * (1 + self.nsis.header.unicode), len(string_block), 1 + self.nsis.header.unicode):
+                # TODO: Prevent Index out of range
+                # Example: e553c9648ea0deffe60d9fbc115cebd0ac441313cfa8eedb322e8be657ddb736
                 if string_block[i + i_offset] == 0x00:
                     break
                 if (
@@ -382,10 +387,22 @@ class Extractor:
                         i_offset += 2
                         nData = ((B & ~0x80) << 7) | (A & ~0x80)
                         if B & 0x80:
-                            retval = self.get_NSIS_string(-nData - 1)
-                            # print("retval => %s" % retval)
-                            strData += retval
+                            try:
+                                retval = self.get_NSIS_string(-nData - 1)
+                                # print("retval => %s" % retval)
+                                if retval is not None:
+                                    strData += retval
+                                else:
+                                    # TODO: Get the right variable instead
+                                    # Example: 574a44fcf5d108e9e69e8e75c53373fbb7a129073cf2039049808d3073a029af
+                                    strData += "$(LANG_VAR)"
+                            except struct.error:
+                                # TODO: Get the right variable instead
+                                # Example: 646761b5072eef4688bd80fce6e4ce25320c94f78e61d7968ce099c52767cffc
+                                strData += "$(LANG_VAR)"
                         else:
+                            # TODO: Figure out how we got here
+                            # Example: fda8cbf2ee876be4eb14d7affca3a0746ef4ae78341dbb589cbdddcf912db85c
                             raise Exception("NSIS_SETUP.get_NSIS_string: How do we get in here? Anything to do?")
                             # fo2.seek(-2, os.SEEK_CUR)
                             # strData += chr(A) + chr(B)
@@ -615,7 +632,6 @@ class Extractor:
         if num in self.UserVarNames:
             pass
         else:
-            self.decompFile.append("Var %s" % UserVarName)
             self.UserVarNames[num] = UserVarName
 
         return "$" + UserVarName
@@ -636,14 +652,14 @@ class Extractor:
 
             isNotLastPage = True  # (page < NB_PAGES_Num-1)
             if isNotLastPage and page.dlg_id >= 0:
-                self.decompFile.append(
+                self.pages.append(
                     "Page %s %s %s %s ; %s"
                     % (PageName, prefuncText, "" if PageName == "custom" else showfuncText, leavefuncText, captiontext)
                 )
                 for param in page.params:
                     if param != 0x00:
-                        self.decompFile.append(instident + self.S(param))
-                self.decompFile.append("")
+                        self.pages.append(instident + self.S(param))
+                self.pages.append("")
 
             if DEBUG:
                 print("dlg_id: 0x%.4X" % (page.dlg_id))
@@ -946,10 +962,7 @@ class Extractor:
                     Decomp = "FindClose %s" % (self.V(parm0))
                     break
                 if case(e.EW_WRITEUNINSTALLER):
-                    global CommentOutWriteUninstaller
-                    Decomp = (NSIS_COMMENT if CommentOutWriteUninstaller else "") + "WriteUninstaller %s" % self.S(
-                        parm0
-                    )
+                    Decomp = NSIS_COMMENT + "WriteUninstaller %s" % self.S(parm0)
                     DecompComment = "Offset: %x  Iconstyle: %x  More: %s" % (parm1, parm2, self.S(parm3))
                     break
                 if case(e.EW_CREATESHORTCUT):
@@ -1637,7 +1650,8 @@ class Extractor:
             if DEBUG:
                 # print(SectionTxt)
                 print(lineDecomp)
-                print(lineDecompcmt)
+                if DEBUG:
+                    print(lineDecompcmt)
 
             #        if SectionTxt:
             #            cls_Decomp.SectionTxt[i] = SectionTxt
@@ -1648,8 +1662,6 @@ class Extractor:
                 self.cls_Decomp.Comments[i] = DecompComment
             self.cls_Decomp.DoSupress[i] = DoSupress or skipCommand
 
-        self.decompFile.append("\n; --------------------")
-        self.decompFile.append("; ENTRIES\n")
         self.SaveDecompiledToNsiFile()
 
     def MakeSectionTxt(self, Tokenindex):
@@ -1662,7 +1674,7 @@ class Extractor:
 
         if pos in self.cls_Decomp.Sections_start:
             if self.cls_Decomp.isInsideFunction:
-                self.decompFile.append("FunctionEnd\n")
+                self.entries.append("FunctionEnd\n")
                 self.cls_Decomp.isInsideFunction = False
 
             SectionTxt += (
@@ -1687,45 +1699,42 @@ class Extractor:
             # Write SectionTxt 'Section[Group]...', 'SectionIn...', 'Section[Group] End'
             SectionTxt = self.MakeSectionTxt(i)
             if SectionTxt:
-                self.decompFile.append(SectionTxt)
+                self.entries.append(SectionTxt)
 
             # Write Function
             if i in self.cls_Decomp.Functions:
                 if self.cls_Decomp.isInsideFunction:
-                    self.decompFile.append("FunctionEnd\n")
+                    self.entries.append("FunctionEnd\n")
                     # self.cls_Decomp.isInsideFunction = False
                 else:
                     self.cls_Decomp.isInsideFunction = True
 
-                self.decompFile.append("%s" % self.cls_Decomp.Functions[i])
+                self.entries.append("%s" % self.cls_Decomp.Functions[i])
 
             # Write Labels
             if i in self.cls_Decomp.Labels:
-                self.decompFile.append("%s" % self.cls_Decomp.Labels[i])
+                self.entries.append("%s" % self.cls_Decomp.Labels[i])
 
             if self.cls_Decomp.DoSupress.get(i, False) is False:
                 if self.supressRawTokens is False:
                     # Write Token info
-                    self.decompFile.append(instident + instident + "%s" % self.cls_Decomp.Tokens.get(i))
+                    self.entries.append(instident + instident + "%s" % self.cls_Decomp.Tokens.get(i))
                 # Write Decompiled Lines
-                self.decompFile.append(
+                self.entries.append(
                     instident + "%s%s" % (self.cls_Decomp.Decomps.get(i), self.cls_Decomp.Comments.get(i))
                 )
 
         if self.cls_Decomp.isInsideFunction:
-            self.decompFile.append("FunctionEnd\n")
+            self.entries.append("FunctionEnd\n")
 
     def generate_setup_file(self):
-        self.decompFile.append("; --------------------")
-        self.decompFile.append("; HEADER\n")
-
         if self.S(self.nsis.header.install_directory_auto_append):
             DecompLine = "Name %s" % self.S(self.nsis.header.install_directory_auto_append)
-            self.decompFile.append(DecompLine)
+            self.header.append(DecompLine)
             DecompLine = "OutFile %s ; NsiDecompiler: generated value!" % self.S(
                 self.nsis.header.install_directory_auto_append, "", ".exe"
             )
-            self.decompFile.append(DecompLine)
+            self.header.append(DecompLine)
 
         def flip_rgb(value):
             return struct.unpack(">I", struct.pack("<I", value))[0] >> 8
@@ -1744,15 +1753,15 @@ class Extractor:
                 bg_color2,
                 bg_textcolor,
             )
-            self.decompFile.append(BGGradient)
+            self.header.append(BGGradient)
 
         if not (lb_fg == lb_bg == EMPTYCOLOR):
             InstallColors = "InstallColors %.6X %.6X" % (lb_fg, lb_bg)
-            self.decompFile.append(InstallColors)
+            self.header.append(InstallColors)
 
         if self.nsis.header.install_directory_ptr:
             DecompLine = "InstallDir %s" % self.S(self.nsis.header.install_directory_ptr)
-            self.decompFile.append(DecompLine)
+            self.header.append(DecompLine)
 
         if self.S(self.nsis.header.install_reg_key_ptr):
             DecompLine = "InstallDirRegKey %s %s %s" % (
@@ -1760,13 +1769,13 @@ class Extractor:
                 self.S(self.nsis.header.install_reg_key_ptr),
                 self.S(self.nsis.header.install_reg_value_ptr),
             )
-            self.decompFile.append(DecompLine)
+            self.header.append(DecompLine)
 
         # Just some static lines to Quickfix certain compiling issues like AddBrandingImage
-        self.decompFile.append(HeaderAddlines)
+        self.header.append(HeaderAddlines)
 
         if self.nsis.header.unicode:
-            self.decompFile.append("Unicode true")
+            self.header.append("Unicode true")
 
         for f in self.nsis.header._fields:
             if f.startswith("code_"):
@@ -1777,26 +1786,40 @@ class Extractor:
         # dump Install Types
         for item in self.DumpInstTypes():
             line = "InstType %s" % item
-            self.decompFile.append(line)
-
-        self.decompFile.append("\n; --------------------")
-        self.decompFile.append("; PAGES\n")
+            self.header.append(line)
 
         self.dumpPages()
 
-        self.decompFile.append("\n; --------------------")
-        self.decompFile.append("; SECTIONS\n")
-
         self.dumpSections()
-
-        self.decompFile.append("\n; --------------------")
-        self.decompFile.append("; VARIABLES\n")
 
         self.ProcessEntries()
 
     def save_setup_file(self, path="output"):
         with open(path, "w") as f:
-            for line in self.decompFile:
+            f.write("; --------------------\n")
+            f.write("; HEADER\n\n")
+            for line in self.header:
+                f.write(f"{line}\n")
+            if DEBUG:
+                # TODO: Add the full LANG STRINGS once most of get_NSIS_string is fixed
+                f.write("\n; --------------------\n")
+                f.write("; LANG STRINGS\n\n")
+                lang_code = struct.unpack("<h", self.nsis.block(fileform.NB_LANGTABLES)[:2])[0]
+                for i in range(int((self.nsis.header.langtable_size - 10) / 4)):
+                    offset = struct.unpack("<i", self.nsis.block(fileform.NB_LANGTABLES)[2 + i * 4 : 2 + i * 4 + 4])[0]
+                    if offset != 0:
+                        print(i, offset, lang_code, self.get_NSIS_string(offset))
+            f.write("\n; --------------------\n")
+            f.write("; VARIABLES\n\n")
+            for k, v in self.UserVarNames.items():
+                f.write(f"Var {v}\n")
+            f.write("\n; --------------------\n")
+            f.write("; PAGES\n\n")
+            for line in self.pages:
+                f.write(f"{line}\n")
+            f.write("\n; --------------------\n")
+            f.write("; ENTRIES\n\n")
+            for line in self.entries:
                 f.write(f"{line}\n")
 
     @staticmethod
