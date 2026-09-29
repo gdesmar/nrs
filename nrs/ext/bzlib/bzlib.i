@@ -50,7 +50,7 @@ void BZ2_Free(State* s) {
 }
 
 int BZ2_Decompress(State *s) {
-  return BZ2_bzDecompress(s);
+  return BZ2_bzDecompress((DState *)s);
 }
 
 %}
